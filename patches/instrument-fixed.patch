@@ -1,0 +1,85 @@
+diff --git a/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebView.java b/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebView.java
+index 7cf3f7f5..c7cfed16 100755
+--- a/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebView.java
++++ b/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebView.java
+@@ -2175,6 +2175,8 @@ final public class InAppWebView extends InputAwareWebView implements InAppWebVie
+ 
+   @Override
+   public void dispose() {
++    // [REPRO-INSTRUMENT]
++    Log.w("IAWV-dispose", "dispose start id=" + System.identityHashCode(this) + " url=" + getUrl());
+     if (channelDelegate != null) {
+       channelDelegate.dispose();
+       channelDelegate = null;
+@@ -2189,8 +2191,20 @@ final public class InAppWebView extends InputAwareWebView implements InAppWebVie
+     setWebChromeClient(new WebChromeClient());
+     setWebViewClient(new WebViewClient() {
+       public void onPageFinished(WebView view, String url) {
++        // [REPRO-INSTRUMENT]
++        Log.w("IAWV-dispose", "dispose client onPageFinished -> destroy() id=" + System.identityHashCode(view) + " url=" + url);
+         destroy();
+       }
++
++      // [REPRO-INSTRUMENT] + FIX: destroy now and report handled
++      @RequiresApi(api = Build.VERSION_CODES.O)
++      @Override
++      public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
++        Log.w("IAWV-dispose", "dispose client onRenderProcessGone id=" + System.identityHashCode(view)
++                + " url=" + view.getUrl() + " didCrash=" + detail.didCrash() + " returns=true (FIXED, destroy now)");
++        destroy();
++        return true;
++      }
+     });
+     interceptOnlyAsyncAjaxRequestsPluginScript = null;
+     userContentController.dispose();
+@@ -2239,10 +2253,20 @@ final public class InAppWebView extends InputAwareWebView implements InAppWebVie
+     }
+     plugin = null;
+     loadUrl("about:blank");
++    // [REPRO-INSTRUMENT] scenario B: terminate the renderer right inside the dispose window
++    Log.w("IAWV-dispose", "dispose loadUrl(about:blank) issued id=" + System.identityHashCode(this));
++    if ("1".equals(System.getProperty("iawv.repro.killInDispose"))
++            && WebViewFeature.isFeatureSupported(WebViewFeature.WEB_VIEW_RENDERER_TERMINATE)) {
++      androidx.webkit.WebViewRenderProcess rp = WebViewCompat.getWebViewRenderProcess(this);
++      boolean ok = rp != null && rp.terminate();
++      Log.w("IAWV-dispose", "scenarioB terminate in dispose id=" + System.identityHashCode(this) + " ok=" + ok);
++    }
+   }
+ 
+   @Override
+   public void destroy() {
++    // [REPRO-INSTRUMENT]
++    Log.w("IAWV-dispose", "destroy() id=" + System.identityHashCode(this));
+     super.destroy();
+   }
+ }
+diff --git a/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebViewClient.java b/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebViewClient.java
+index aa594952..0084c3ab 100755
+--- a/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebViewClient.java
++++ b/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebViewClient.java
+@@ -792,6 +792,10 @@ public class InAppWebViewClient extends WebViewClient {
+   @Override
+   public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+     final InAppWebView webView = (InAppWebView) view;
++    // [REPRO-INSTRUMENT]
++    android.util.Log.w("IAWV-client", "InAppWebViewClient.onRenderProcessGone id=" + System.identityHashCode(view)
++            + " didCrash=" + detail.didCrash() + " channelDelegateNull=" + (webView.channelDelegate == null)
++            + " useOnRenderProcessGone=" + webView.customSettings.useOnRenderProcessGone);
+ 
+     if (webView.customSettings.useOnRenderProcessGone && webView.channelDelegate != null) {
+       boolean didCrash = detail.didCrash();
+diff --git a/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebViewClientCompat.java b/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebViewClientCompat.java
+index fed10340..7800fd1c 100755
+--- a/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebViewClientCompat.java
++++ b/flutter_inappwebview_android/android/src/main/java/com/pichillilorenzo/flutter_inappwebview_android/webview/in_app_webview/InAppWebViewClientCompat.java
+@@ -818,6 +818,10 @@ public class InAppWebViewClientCompat extends WebViewClientCompat {
+   @Override
+   public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+     final InAppWebView webView = (InAppWebView) view;
++    // [REPRO-INSTRUMENT]
++    android.util.Log.w("IAWV-client", "InAppWebViewClientCompat.onRenderProcessGone id=" + System.identityHashCode(view)
++            + " didCrash=" + detail.didCrash() + " channelDelegateNull=" + (webView.channelDelegate == null)
++            + " useOnRenderProcessGone=" + webView.customSettings.useOnRenderProcessGone);
+ 
+     if (webView.customSettings.useOnRenderProcessGone && webView.channelDelegate != null) {
+       boolean didCrash = detail.didCrash();
